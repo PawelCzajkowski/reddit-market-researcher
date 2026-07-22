@@ -9,6 +9,7 @@ fake and never calls OpenAI.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import datetime, timezone
 
 from ..models.cache import RawCache
@@ -24,8 +25,11 @@ from ..models.output import (
 from .extract import StructuredModel, run_map
 from .filtering import filter_comments
 from .sentiment import aggregate_sentiment
+from .summarize import SummaryContext
 
 SUMMARY_PLACEHOLDER = "Executive summary pending."
+
+Summarizer = Callable[[SummaryContext], str]
 
 
 def _iso(dt: datetime) -> str:
@@ -68,6 +72,7 @@ def run_analysis(
     map_model: StructuredModel,
     min_score: int,
     model_id: str,
+    summarizer: Summarizer | None = None,
     generated_at: datetime | None = None,
 ) -> AnalysisResult:
     generated_at = generated_at or datetime.now(timezone.utc)
@@ -79,14 +84,32 @@ def run_analysis(
         (e.sentiment.label, e.sentiment.score) for e in extracts
     )
 
+    themes: list = []
+    feature_requests: list = []
+    competitor_mentions: list = []
+
+    if summarizer is not None:
+        context = SummaryContext(
+            topic=topic,
+            subreddits=cache.metadata.subreddits,
+            overall=overall_sentiment,
+            analyzed_comment_count=len(filtered),
+            themes=themes,
+            feature_requests=feature_requests,
+            competitor_mentions=competitor_mentions,
+        )
+        executive_summary = summarizer(context)
+    else:
+        executive_summary = SUMMARY_PLACEHOLDER
+
     return AnalysisResult(
         run_metadata=_run_metadata(
             cache, min_score=min_score, model_id=model_id, generated_at=generated_at
         ),
         overall=Overall(
-            executive_summary=SUMMARY_PLACEHOLDER, sentiment=overall_sentiment
+            executive_summary=executive_summary, sentiment=overall_sentiment
         ),
-        themes=[],
-        feature_requests=[],
-        competitor_mentions=[],
+        themes=themes,
+        feature_requests=feature_requests,
+        competitor_mentions=competitor_mentions,
     )

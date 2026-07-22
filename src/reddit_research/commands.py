@@ -18,6 +18,7 @@ from .config import OpenAICredentials, RedditCredentials
 from .fetch.query import cache_path, query_hash
 from .fetch.reddit import build_reddit, fetch_corpus
 from .models.cache import FetchParams, RawCache
+from .report import render_report
 
 
 def _fetch_to_cache(
@@ -84,7 +85,8 @@ def analyze_command(
     model: str,
     yes: bool,
 ) -> None:
-    from .analyze.llm import build_map_model
+    from .analyze.llm import build_map_model, build_summary_model
+    from .analyze.summarize import SummaryContext, run_summary
 
     OpenAICredentials.from_env()  # fail early with a clear error if the key is missing
     cache = _resolve_cache(
@@ -96,21 +98,30 @@ def analyze_command(
 
     generated_at = datetime.now(timezone.utc)
     map_model = build_map_model(model)
+    summary_model = build_summary_model(model)
+
+    def summarizer(ctx: SummaryContext) -> str:
+        return run_summary(summary_model, ctx)
+
     result = run_analysis(
         cache,
         map_model=map_model,
         min_score=min_score,
         model_id=model,
+        summarizer=summarizer,
         generated_at=generated_at,
     )
 
-    json_path, _md_path = result_paths(topic, generated_at, defaults.RESULTS_DIR)
+    json_path, md_path = result_paths(topic, generated_at, defaults.RESULTS_DIR)
     json_path.parent.mkdir(parents=True, exist_ok=True)
     json_path.write_text(result.model_dump_json(indent=2), encoding="utf-8")
+    md_path.write_text(render_report(result), encoding="utf-8")
     typer.echo(
         f"Analyzed {result.run_metadata.corpus.comment_count} comments; "
         f"overall sentiment={result.overall.sentiment.label} "
-        f"({result.overall.sentiment.score:+.2f}) -> {json_path}"
+        f"({result.overall.sentiment.score:+.2f})\n"
+        f"  JSON  -> {json_path}\n"
+        f"  report -> {md_path}"
     )
 
 

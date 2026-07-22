@@ -12,6 +12,7 @@ from __future__ import annotations
 from typing import Any
 
 from .extract import MapBatchOutput
+from .summarize import SummaryOutput
 
 
 def build_chat_model(model_id: str) -> Any:
@@ -24,4 +25,11 @@ def build_map_model(model_id: str) -> Any:
     """A structured runnable that returns MapBatchOutput per input (strict json_schema)."""
     return build_chat_model(model_id).with_structured_output(
         MapBatchOutput, method="json_schema", strict=True
+    )
+
+
+def build_summary_model(model_id: str) -> Any:
+    """A structured runnable that returns a SummaryOutput (strict json_schema)."""
+    return build_chat_model(model_id).with_structured_output(
+        SummaryOutput, method="json_schema", strict=True
     )
