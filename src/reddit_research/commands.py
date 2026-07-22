@@ -5,14 +5,17 @@ Each handler is invoked by `cli.py` after flags are parsed and `.env` is loaded.
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from pathlib import Path
 
 import typer
 
 from . import defaults
-from .cache_store import write_cache
-from .config import RedditCredentials
-from .fetch.query import cache_path
+from .analyze.pipeline import run_analysis
+from .analyze.results import result_paths
+from .cache_store import read_cache, write_cache
+from .config import OpenAICredentials, RedditCredentials
+from .fetch.query import cache_path, query_hash
 from .fetch.reddit import build_reddit, fetch_corpus
 from .models.cache import FetchParams, RawCache
 
@@ -52,6 +55,26 @@ def fetch_command(
     )
 
 
+def _resolve_cache(
+    *, topic: str, subreddits: list[str], use_cached: bool, cache_dir: str
+) -> RawCache:
+    """Reuse the query-keyed cache when `--use-cached` and it exists; else fetch fresh.
+
+    Analyze has no fetch-param flags (SPEC §4), so the query key is computed with
+    default fetch params — the same key `fetch` writes with defaults.
+    """
+    params = FetchParams()
+    path = cache_path(topic, query_hash(topic, subreddits, params), cache_dir)
+    if use_cached and path.exists():
+        typer.echo(f"Using cached corpus: {path}")
+        return read_cache(path)
+    cache, path = _fetch_to_cache(
+        topic=topic, subreddits=subreddits, params=params, cache_dir=cache_dir
+    )
+    typer.echo(f"Fetched fresh corpus -> {path}")
+    return cache
+
+
 def analyze_command(
     *,
     topic: str,
@@ -61,9 +84,33 @@ def analyze_command(
     model: str,
     yes: bool,
 ) -> None:
+    from .analyze.llm import build_map_model
+
+    OpenAICredentials.from_env()  # fail early with a clear error if the key is missing
+    cache = _resolve_cache(
+        topic=topic,
+        subreddits=subreddits,
+        use_cached=use_cached,
+        cache_dir=defaults.CACHE_DIR,
+    )
+
+    generated_at = datetime.now(timezone.utc)
+    map_model = build_map_model(model)
+    result = run_analysis(
+        cache,
+        map_model=map_model,
+        min_score=min_score,
+        model_id=model,
+        generated_at=generated_at,
+    )
+
+    json_path, _md_path = result_paths(topic, generated_at, defaults.RESULTS_DIR)
+    json_path.parent.mkdir(parents=True, exist_ok=True)
+    json_path.write_text(result.model_dump_json(indent=2), encoding="utf-8")
     typer.echo(
-        f"[stub] analyze topic={topic!r} subreddits={subreddits} "
-        f"use_cached={use_cached} min_score={min_score} model={model!r} yes={yes}"
+        f"Analyzed {result.run_metadata.corpus.comment_count} comments; "
+        f"overall sentiment={result.overall.sentiment.label} "
+        f"({result.overall.sentiment.score:+.2f}) -> {json_path}"
     )
 
 
