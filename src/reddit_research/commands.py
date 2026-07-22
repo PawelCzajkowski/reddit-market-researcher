@@ -85,8 +85,11 @@ def analyze_command(
     model: str,
     yes: bool,
 ) -> None:
+    from .analyze.cost import estimate_cost
     from .analyze.llm import build_map_model, build_summary_model
     from .analyze.summarize import SummaryContext, run_summary
+    from .config import langsmith_enabled
+    from .models.cache import CachedComment
 
     OpenAICredentials.from_env()  # fail early with a clear error if the key is missing
     cache = _resolve_cache(
@@ -95,6 +98,30 @@ def analyze_command(
         use_cached=use_cached,
         cache_dir=defaults.CACHE_DIR,
     )
+
+    if langsmith_enabled():
+        typer.secho(
+            "LangSmith tracing is ON — per-run cost will be reported by LangSmith. "
+            "Note: the Reddit comment text sent to the model is included in traces "
+            "uploaded to LangSmith's cloud.",
+            fg=typer.colors.YELLOW,
+        )
+
+    def preflight(filtered: list[CachedComment]) -> None:
+        est = estimate_cost(filtered, topic=topic, model_id=model)
+        note = "" if est.price_known else " (no local price for this model; conservative estimate)"
+        typer.echo(
+            f"Pre-flight estimate: ~${est.projected_usd:.2f} for {len(filtered)} comments "
+            f"(~{est.input_tokens:,} in / ~{est.output_tokens:,} out tokens){note}"
+        )
+        if est.projected_usd > defaults.COST_SOFT_CEILING_USD and not yes:
+            typer.secho(
+                f"Projected cost ${est.projected_usd:.2f} exceeds the "
+                f"${defaults.COST_SOFT_CEILING_USD:.2f} soft ceiling.",
+                fg=typer.colors.YELLOW,
+            )
+            if not typer.confirm("Proceed with the analysis?"):
+                raise typer.Abort()
 
     generated_at = datetime.now(timezone.utc)
     map_model = build_map_model(model)
@@ -109,6 +136,7 @@ def analyze_command(
         min_score=min_score,
         model_id=model,
         summarizer=summarizer,
+        preflight=preflight,
         generated_at=generated_at,
     )
 

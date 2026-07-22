@@ -12,7 +12,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from datetime import datetime, timezone
 
-from ..models.cache import RawCache
+from ..models.cache import CachedComment, RawCache
 from ..models.output import (
     AnalysisResult,
     Corpus,
@@ -30,6 +30,8 @@ from .summarize import SummaryContext
 SUMMARY_PLACEHOLDER = "Executive summary pending."
 
 Summarizer = Callable[[SummaryContext], str]
+# Invoked after the code filter and before any paid LLM call; may raise to abort.
+Preflight = Callable[[list[CachedComment]], None]
 
 
 def _iso(dt: datetime) -> str:
@@ -73,12 +75,15 @@ def run_analysis(
     min_score: int,
     model_id: str,
     summarizer: Summarizer | None = None,
+    preflight: Preflight | None = None,
     generated_at: datetime | None = None,
 ) -> AnalysisResult:
     generated_at = generated_at or datetime.now(timezone.utc)
     topic = cache.metadata.topic
 
     filtered = filter_comments(cache, min_score=min_score, topic=topic)
+    if preflight is not None:
+        preflight(filtered)  # cost gate — runs before any paid LLM call
     extracts = run_map(map_model, filtered, topic=topic)
     overall_sentiment = aggregate_sentiment(
         (e.sentiment.label, e.sentiment.score) for e in extracts
