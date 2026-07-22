@@ -22,7 +22,9 @@ from ..models.output import (
     RunParams,
     SubredditCorpus,
 )
-from .extract import StructuredModel, run_map
+from .aggregate import aggregate_themes, pair
+from .canonicalize import ThemeTaxonomy
+from .extract import CommentExtract, StructuredModel, run_map
 from .filtering import filter_comments
 from .sentiment import aggregate_sentiment
 from .summarize import SummaryContext
@@ -32,6 +34,8 @@ SUMMARY_PLACEHOLDER = "Executive summary pending."
 Summarizer = Callable[[SummaryContext], str]
 # Invoked after the code filter and before any paid LLM call; may raise to abort.
 Preflight = Callable[[list[CachedComment]], None]
+# (label, count) pairs + raw competitor names + topic -> canonicalized taxonomy.
+Canonicalizer = Callable[[list[tuple[str, int]], list[str], str], ThemeTaxonomy]
 
 
 def _iso(dt: datetime) -> str:
@@ -68,12 +72,25 @@ def _run_metadata(
     )
 
 
+def _canonicalize(
+    canonicalizer: Canonicalizer, extracts: list[CommentExtract], *, topic: str
+) -> ThemeTaxonomy:
+    from .canonicalize import label_counts
+
+    labels = [lbl for e in extracts for lbl in e.candidate_theme_labels]
+    competitors = [
+        cm.name for e in extracts for cm in getattr(e, "competitor_mentions", [])
+    ]
+    return canonicalizer(label_counts(labels), competitors, topic)
+
+
 def run_analysis(
     cache: RawCache,
     *,
     map_model: StructuredModel,
     min_score: int,
     model_id: str,
+    canonicalizer: Canonicalizer | None = None,
     summarizer: Summarizer | None = None,
     preflight: Preflight | None = None,
     generated_at: datetime | None = None,
@@ -92,6 +109,13 @@ def run_analysis(
     themes: list = []
     feature_requests: list = []
     competitor_mentions: list = []
+
+    if canonicalizer is not None:
+        analyzed = pair(filtered, extracts)
+        taxonomy = _canonicalize(canonicalizer, extracts, topic=topic)
+        themes = aggregate_themes(
+            analyzed, taxonomy, total_analyzed=len(filtered)
+        )
 
     if summarizer is not None:
         context = SummaryContext(

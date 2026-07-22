@@ -8,7 +8,7 @@ executive summary, and overall sentiment.
 
 from __future__ import annotations
 
-from .models.output import AnalysisResult, SentimentBlock
+from .models.output import AnalysisResult, Quote, SentimentBlock, Theme
 
 
 def _sentiment_md(sb: SentimentBlock) -> str:
@@ -17,6 +17,33 @@ def _sentiment_md(sb: SentimentBlock) -> str:
         f"**{sb.label}** (score {sb.score:+.2f}) — "
         f"{d.positive} positive / {d.negative} negative / {d.neutral} neutral"
     )
+
+
+def _quote_md(q: Quote) -> str:
+    author = q.author or "unknown"
+    return (
+        f"> {q.text}\n>\n"
+        f"> — {author}, [{q.subreddit}]({q.permalink}) "
+        f"(score {q.score})"
+    )
+
+
+def _theme_md(theme: Theme) -> list[str]:
+    tag = " 🔴 pain point" if theme.is_pain_point else ""
+    lines = [
+        f"### {theme.label}{tag}",
+        "",
+        theme.description,
+        "",
+        f"- **Prevalence:** {theme.prevalence.mention_count} mentions "
+        f"({theme.prevalence.comment_percentage:.1f}% of analyzed comments)",
+        f"- **Sentiment:** {_sentiment_md(theme.sentiment)}",
+        "",
+    ]
+    for q in theme.representative_quotes:
+        lines.append(_quote_md(q))
+        lines.append("")
+    return lines
 
 
 def render_report(result: AnalysisResult) -> str:
@@ -49,4 +76,11 @@ def render_report(result: AnalysisResult) -> str:
     lines.append("")
     lines.append(_sentiment_md(result.overall.sentiment))
     lines.append("")
+
+    if result.themes:
+        lines.append("## Themes")
+        lines.append("")
+        for theme in result.themes:
+            lines.extend(_theme_md(theme))
+
     return "\n".join(lines)

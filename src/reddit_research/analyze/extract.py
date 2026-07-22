@@ -31,6 +31,18 @@ class CommentSentiment(BaseModel):
 class CommentExtract(BaseModel):
     comment_id: str
     sentiment: CommentSentiment
+    candidate_theme_labels: list[str]  # short free-text phrases (canonicalized later)
+    quote_worthy: bool
+
+
+def default_extract(comment_id: str) -> "CommentExtract":
+    """Neutral placeholder for a comment the model failed to score."""
+    return CommentExtract(
+        comment_id=comment_id,
+        sentiment=CommentSentiment(label="neutral", score=0.0),
+        candidate_theme_labels=[],
+        quote_worthy=False,
+    )
 
 
 class MapBatchOutput(BaseModel):
@@ -46,8 +58,14 @@ class StructuredModel(Protocol):
 _SYSTEM_PROMPT = (
     "You extract structured signal from Reddit comments for market research about "
     "a given topic. For EACH comment in the batch, return one extract preserving its "
-    "comment_id. Classify sentiment toward the topic as 'positive', 'negative', or "
-    "'neutral', with a score from -1.0 (very negative) to 1.0 (very positive). "
+    "comment_id.\n"
+    "- sentiment: classify sentiment toward the topic as 'positive', 'negative', or "
+    "'neutral', with a score from -1.0 (very negative) to 1.0 (very positive).\n"
+    "- candidate_theme_labels: 1-3 short free-text phrases (2-4 words) naming what the "
+    "comment is about (e.g. 'slow on large workspaces', 'steep learning curve'); empty "
+    "list if the comment carries no clear theme.\n"
+    "- quote_worthy: true if the comment is a vivid, self-contained statement that would "
+    "make a good representative quote.\n"
     "Do not invent comment_ids; return exactly one extract per input comment."
 )
 
@@ -107,12 +125,4 @@ def run_map(
         for extract in out.extracts:
             by_id.setdefault(extract.comment_id, extract)
 
-    return [
-        by_id.get(
-            c.id,
-            CommentExtract(
-                comment_id=c.id, sentiment=CommentSentiment(label="neutral", score=0.0)
-            ),
-        )
-        for c in comments
-    ]
+    return [by_id.get(c.id, default_extract(c.id)) for c in comments]

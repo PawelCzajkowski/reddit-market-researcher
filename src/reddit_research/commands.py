@@ -85,8 +85,13 @@ def analyze_command(
     model: str,
     yes: bool,
 ) -> None:
+    from .analyze.canonicalize import run_canonicalize
     from .analyze.cost import estimate_cost
-    from .analyze.llm import build_map_model, build_summary_model
+    from .analyze.llm import (
+        build_canonicalize_model,
+        build_map_model,
+        build_summary_model,
+    )
     from .analyze.summarize import SummaryContext, run_summary
     from .config import langsmith_enabled
     from .models.cache import CachedComment
@@ -125,7 +130,11 @@ def analyze_command(
 
     generated_at = datetime.now(timezone.utc)
     map_model = build_map_model(model)
+    canonicalize_model = build_canonicalize_model(model)
     summary_model = build_summary_model(model)
+
+    def canonicalizer(counts, competitors, topic_):  # noqa: ANN001, ANN202
+        return run_canonicalize(canonicalize_model, counts, competitors, topic=topic_)
 
     def summarizer(ctx: SummaryContext) -> str:
         return run_summary(summary_model, ctx)
@@ -135,6 +144,7 @@ def analyze_command(
         map_model=map_model,
         min_score=min_score,
         model_id=model,
+        canonicalizer=canonicalizer,
         summarizer=summarizer,
         preflight=preflight,
         generated_at=generated_at,

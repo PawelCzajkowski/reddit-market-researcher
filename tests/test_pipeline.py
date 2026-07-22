@@ -41,10 +41,13 @@ class FakeMapModel:
                     cid = line[line.index("[") + 1 : line.index("]")]
                     body = line[line.index("]") + 1 :]
                     label, score = self._label(body)
+                    theme = "performance" if "slow" in body else "sentiment"
                     extracts.append(
                         CommentExtract(
                             comment_id=cid,
                             sentiment=CommentSentiment(label=label, score=score),
+                            candidate_theme_labels=[theme],
+                            quote_worthy=True,
                         )
                     )
             outputs.append(MapBatchOutput(extracts=extracts))
