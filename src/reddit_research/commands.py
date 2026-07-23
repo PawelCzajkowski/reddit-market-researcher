@@ -13,7 +13,7 @@ import typer
 from . import defaults
 from .analyze.pipeline import run_analysis
 from .analyze.results import result_paths
-from .cache_store import read_cache, write_cache
+from .cache_store import cache_age_days, purge_cache, read_cache, write_cache
 from .config import OpenAICredentials, RedditCredentials
 from .fetch.query import cache_path, query_hash
 from .fetch.reddit import build_reddit, fetch_corpus
@@ -67,8 +67,18 @@ def _resolve_cache(
     params = FetchParams()
     path = cache_path(topic, query_hash(topic, subreddits, params), cache_dir)
     if use_cached and path.exists():
+        cache = read_cache(path)
+        age = cache_age_days(cache)
+        if age > defaults.CACHE_TTL_DAYS:
+            typer.secho(
+                f"Warning: cached corpus is {age:.0f} days old "
+                f"(> {defaults.CACHE_TTL_DAYS}-day TTL); proceeding anyway. "
+                f"Re-run `fetch` for a fresh corpus.",
+                fg=typer.colors.YELLOW,
+                err=True,
+            )
         typer.echo(f"Using cached corpus: {path}")
-        return read_cache(path)
+        return cache
     cache, path = _fetch_to_cache(
         topic=topic, subreddits=subreddits, params=params, cache_dir=cache_dir
     )
@@ -164,4 +174,10 @@ def analyze_command(
 
 
 def cache_purge_command(*, older_than_days: int) -> None:
-    typer.echo(f"[stub] cache purge older_than_days={older_than_days}")
+    deleted = purge_cache(defaults.CACHE_DIR, older_than_days=older_than_days)
+    if not deleted:
+        typer.echo(f"No cache files older than {older_than_days} days.")
+        return
+    for path in deleted:
+        typer.echo(f"Deleted {path}")
+    typer.echo(f"Purged {len(deleted)} cache file(s) older than {older_than_days} days.")
