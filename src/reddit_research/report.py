@@ -8,7 +8,14 @@ executive summary, and overall sentiment.
 
 from __future__ import annotations
 
-from .models.output import AnalysisResult, Quote, SentimentBlock, Theme
+from .models.output import (
+    AnalysisResult,
+    CompetitorMention,
+    FeatureRequest,
+    Quote,
+    SentimentBlock,
+    Theme,
+)
 
 
 def _sentiment_md(sb: SentimentBlock) -> str:
@@ -41,6 +48,37 @@ def _theme_md(theme: Theme) -> list[str]:
         "",
     ]
     for q in theme.representative_quotes:
+        lines.append(_quote_md(q))
+        lines.append("")
+    return lines
+
+
+def _feature_request_md(fr: FeatureRequest) -> list[str]:
+    lines = [
+        f"### {fr.request}",
+        "",
+        f"- **Prevalence:** {fr.prevalence.mention_count} mentions "
+        f"({fr.prevalence.comment_percentage:.1f}% of analyzed comments)",
+    ]
+    if fr.rationale:
+        lines.append(f"- **Why:** {fr.rationale}")
+    lines.append("")
+    for q in fr.representative_quotes:
+        lines.append(_quote_md(q))
+        lines.append("")
+    return lines
+
+
+def _competitor_md(cm: CompetitorMention) -> list[str]:
+    rel = f" ({cm.relationship})" if cm.relationship else ""
+    lines = [
+        f"### {cm.name}{rel}",
+        "",
+        f"- **Mentions:** {cm.mention_count}",
+        f"- **Sentiment:** {_sentiment_md(cm.sentiment)}",
+        "",
+    ]
+    for q in cm.representative_quotes:
         lines.append(_quote_md(q))
         lines.append("")
     return lines
@@ -82,5 +120,17 @@ def render_report(result: AnalysisResult) -> str:
         lines.append("")
         for theme in result.themes:
             lines.extend(_theme_md(theme))
+
+    if result.feature_requests:
+        lines.append("## Feature requests")
+        lines.append("")
+        for fr in result.feature_requests:
+            lines.extend(_feature_request_md(fr))
+
+    if result.competitor_mentions:
+        lines.append("## Competitor & alternative mentions")
+        lines.append("")
+        for cm in result.competitor_mentions:
+            lines.extend(_competitor_md(cm))
 
     return "\n".join(lines)

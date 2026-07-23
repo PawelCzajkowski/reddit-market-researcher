@@ -20,6 +20,10 @@ def _extract(cid: str, labels: list[str], *, label="negative", score=-0.5, worth
         sentiment=CommentSentiment(label=label, score=score),
         candidate_theme_labels=labels,
         quote_worthy=worthy,
+        is_feature_request=False,
+        feature_request_text=None,
+        feature_request_rationale=None,
+        competitor_mentions=[],
     )
 
 

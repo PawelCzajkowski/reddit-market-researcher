@@ -8,11 +8,21 @@ are enforced in code because OpenAI strict mode cannot cap arrays (D1/D2).
 
 from __future__ import annotations
 
+import re
+from collections import Counter
 from dataclasses import dataclass
 
 from ..defaults import MAX_QUOTES_PER_THEME, MAX_THEMES
+from ..fetch.query import slugify
 from ..models.cache import CachedComment
-from ..models.output import Prevalence, Quote, Theme
+from ..models.output import (
+    CompetitorMention,
+    CompetitorRelationship,
+    FeatureRequest,
+    Prevalence,
+    Quote,
+    Theme,
+)
 from .canonicalize import ThemeTaxonomy
 from .extract import CommentExtract
 from .sentiment import aggregate_sentiment
@@ -99,3 +109,97 @@ def aggregate_themes(
     # order by prevalence desc (stable tie-break on id), keep top ~MAX_THEMES
     themes.sort(key=lambda t: (-t.prevalence.mention_count, t.id))
     return themes[:MAX_THEMES]
+
+
+_WS_RE = re.compile(r"\s+")
+
+
+def _canonical_text_key(text: str) -> str:
+    """Normalize free-text for grouping: lowercase, strip punctuation/whitespace."""
+    cleaned = re.sub(r"[^a-z0-9\s]", "", text.lower())
+    return _WS_RE.sub(" ", cleaned).strip()
+
+
+def aggregate_feature_requests(
+    analyzed: list[AnalyzedComment], *, total_analyzed: int
+) -> list[FeatureRequest]:
+    """Group feature requests by canonicalized text; prevalence + <=3 quotes each."""
+    groups: dict[str, list[AnalyzedComment]] = {}
+    for item in analyzed:
+        if not item.extract.is_feature_request or not item.extract.feature_request_text:
+            continue
+        key = _canonical_text_key(item.extract.feature_request_text)
+        if key:
+            groups.setdefault(key, []).append(item)
+
+    requests: list[FeatureRequest] = []
+    for members in groups.values():
+        texts = [m.extract.feature_request_text or "" for m in members]
+        request = Counter(texts).most_common(1)[0][0]
+        rationale = next(
+            (m.extract.feature_request_rationale for m in members
+             if m.extract.feature_request_rationale),
+            "",
+        )
+        requests.append(
+            FeatureRequest(
+                id=slugify(request),
+                request=request,
+                rationale=rationale or "",
+                prevalence=Prevalence(
+                    mention_count=len(members),
+                    comment_percentage=_percentage(len(members), total_analyzed),
+                ),
+                representative_quotes=_representative_quotes(members),
+            )
+        )
+
+    requests.sort(key=lambda fr: (-fr.prevalence.mention_count, fr.id))
+    return requests
+
+
+def _mode_relationship(
+    relationships: list[CompetitorRelationship | None],
+) -> CompetitorRelationship | None:
+    present = [r for r in relationships if r is not None]
+    if not present:
+        return None
+    return Counter(present).most_common(1)[0][0]
+
+
+def aggregate_competitors(
+    analyzed: list[AnalyzedComment], taxonomy: ThemeTaxonomy
+) -> list[CompetitorMention]:
+    """Group competitor mentions by canonical name (via competitor_map)."""
+    name_map = {ca.raw_name.strip().lower(): ca.canonical_name for ca in taxonomy.competitor_map}
+
+    members: dict[str, list[AnalyzedComment]] = {}
+    relationships: dict[str, list[CompetitorRelationship | None]] = {}
+    for item in analyzed:
+        seen: set[str] = set()
+        for cm in item.extract.competitor_mentions:
+            canonical = name_map.get(cm.name.strip().lower(), cm.name.strip())
+            if not canonical:
+                continue
+            relationships.setdefault(canonical, []).append(cm.relationship)
+            if canonical not in seen:  # count each comment once per competitor
+                members.setdefault(canonical, []).append(item)
+                seen.add(canonical)
+
+    mentions: list[CompetitorMention] = []
+    for name, group in members.items():
+        sentiment = aggregate_sentiment(
+            (m.extract.sentiment.label, m.extract.sentiment.score) for m in group
+        )
+        mentions.append(
+            CompetitorMention(
+                name=name,
+                relationship=_mode_relationship(relationships[name]),
+                sentiment=sentiment,
+                mention_count=len(group),
+                representative_quotes=_representative_quotes(group),
+            )
+        )
+
+    mentions.sort(key=lambda cm: (-cm.mention_count, cm.name))
+    return mentions

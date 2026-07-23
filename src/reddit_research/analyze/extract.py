@@ -12,11 +12,12 @@ fields are layered on in later tickets.
 
 from __future__ import annotations
 
-from typing import Any, Literal, Protocol
+from typing import Any, Literal, Optional, Protocol
 
 from pydantic import BaseModel
 
 from ..models.cache import CachedComment
+from ..models.output import CompetitorRelationship
 
 CommentSentimentLabel = Literal["positive", "negative", "neutral"]
 
@@ -28,11 +29,20 @@ class CommentSentiment(BaseModel):
     score: float
 
 
+class CompetitorMentionExtract(BaseModel):
+    name: str
+    relationship: Optional[CompetitorRelationship]  # null if unclear
+
+
 class CommentExtract(BaseModel):
     comment_id: str
     sentiment: CommentSentiment
     candidate_theme_labels: list[str]  # short free-text phrases (canonicalized later)
     quote_worthy: bool
+    is_feature_request: bool
+    feature_request_text: Optional[str]  # the requested capability; null if none
+    feature_request_rationale: Optional[str]  # why users want it; null if none
+    competitor_mentions: list[CompetitorMentionExtract]
 
 
 def default_extract(comment_id: str) -> "CommentExtract":
@@ -42,6 +52,10 @@ def default_extract(comment_id: str) -> "CommentExtract":
         sentiment=CommentSentiment(label="neutral", score=0.0),
         candidate_theme_labels=[],
         quote_worthy=False,
+        is_feature_request=False,
+        feature_request_text=None,
+        feature_request_rationale=None,
+        competitor_mentions=[],
     )
 
 
@@ -66,6 +80,13 @@ _SYSTEM_PROMPT = (
     "list if the comment carries no clear theme.\n"
     "- quote_worthy: true if the comment is a vivid, self-contained statement that would "
     "make a good representative quote.\n"
+    "- is_feature_request / feature_request_text / feature_request_rationale: set "
+    "is_feature_request=true when the comment asks for a capability the topic lacks; "
+    "then feature_request_text is the requested capability and feature_request_rationale "
+    "is why users want it. Otherwise all three are false/null.\n"
+    "- competitor_mentions: for each competing product/alternative named, its name and a "
+    "relationship ('alternative', 'comparison', 'switching_to', 'switching_from', "
+    "'complementary') or null if unclear; empty list if none.\n"
     "Do not invent comment_ids; return exactly one extract per input comment."
 )
 

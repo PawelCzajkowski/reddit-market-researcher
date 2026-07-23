@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from reddit_research.analyze.extract import (
     CommentExtract,
     CommentSentiment,
+    CompetitorMentionExtract,
     MapBatchOutput,
 )
 from reddit_research.analyze.pipeline import run_analysis
@@ -42,12 +43,22 @@ class FakeMapModel:
                     body = line[line.index("]") + 1 :]
                     label, score = self._label(body)
                     theme = "performance" if "slow" in body else "sentiment"
+                    is_fr = "wish" in body or "need" in body
+                    competitors = (
+                        [CompetitorMentionExtract(name="Obsidian", relationship="switching_to")]
+                        if "obsidian" in body
+                        else []
+                    )
                     extracts.append(
                         CommentExtract(
                             comment_id=cid,
                             sentiment=CommentSentiment(label=label, score=score),
                             candidate_theme_labels=[theme],
                             quote_worthy=True,
+                            is_feature_request=is_fr,
+                            feature_request_text="offline mode" if is_fr else None,
+                            feature_request_rationale="works on flights" if is_fr else None,
+                            competitor_mentions=competitors,
                         )
                     )
             outputs.append(MapBatchOutput(extracts=extracts))
@@ -106,3 +117,60 @@ def test_default_model_is_gpt_54_mini() -> None:
     from reddit_research import defaults
 
     assert defaults.DEFAULT_MODEL == "gpt-5.4-mini"
+
+
+def test_full_pipeline_populates_themes_features_competitors() -> None:
+    from reddit_research.analyze.canonicalize import (
+        CompetitorAssignment,
+        LabelAssignment,
+        TaxonomyTheme,
+        ThemeTaxonomy,
+    )
+
+    comments = [
+        comment("c1", body="notion is slow", score=20),
+        comment("c2", body="notion is slow too", score=18),
+        comment("c3", body="wish notion had offline mode", score=15),
+        comment("c4", body="switching to obsidian from notion", score=12),
+    ]
+    cache = make_cache([post("p1", comments)], topic="Notion")
+
+    def canonicalizer(counts, competitors, topic) -> ThemeTaxonomy:
+        return ThemeTaxonomy(
+            themes=[
+                TaxonomyTheme(
+                    id="performance",
+                    label="Performance",
+                    description="Speed complaints.",
+                    is_pain_point=True,
+                ),
+                TaxonomyTheme(
+                    id="sentiment",
+                    label="General sentiment",
+                    description="Everything else.",
+                    is_pain_point=False,
+                ),
+            ],
+            label_map=[
+                LabelAssignment(raw_label="performance", theme_id="performance"),
+                LabelAssignment(raw_label="sentiment", theme_id="sentiment"),
+            ],
+            competitor_map=[
+                CompetitorAssignment(raw_name="Obsidian", canonical_name="Obsidian")
+            ],
+        )
+
+    result = run_analysis(
+        cache,
+        map_model=FakeMapModel(),
+        min_score=5,
+        model_id="gpt-5.4-mini",
+        canonicalizer=canonicalizer,
+        summarizer=lambda ctx: f"Summary of {ctx.analyzed_comment_count} comments.",
+        generated_at=GEN,
+    )
+
+    assert result.themes  # at least one theme populated
+    assert any(fr.request.lower() == "offline mode" for fr in result.feature_requests)
+    assert any(cm.name == "Obsidian" for cm in result.competitor_mentions)
+    assert result.overall.executive_summary == "Summary of 4 comments."

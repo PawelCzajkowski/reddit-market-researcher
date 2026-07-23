@@ -1,10 +1,11 @@
 """Analyze-stage orchestration: RawCache -> AnalysisResult (D2 pipeline).
 
-For #11 this is the tracer bullet: filter (code) -> map/extract (LLM) -> overall
-sentiment (code) -> AnalysisResult. Themes, feature requests, and competitor
-mentions are empty here; later tickets layer canonicalize/aggregate/summarize in.
-The structured map model is injected so the whole pipeline runs in tests with a
-fake and never calls OpenAI.
+filter (code) -> map/extract (LLM, batched) -> canonicalize themes (LLM) ->
+aggregate themes/feature-requests/competitors (code) -> summarize (LLM). The
+canonicalizer and summarizer are optional injected steps: when omitted (or when a
+preflight gate aborts) the run degrades gracefully to overall sentiment only. All
+LLM steps are injected seams, so the whole pipeline runs in tests with fakes and
+never calls OpenAI.
 """
 
 from __future__ import annotations
@@ -22,7 +23,12 @@ from ..models.output import (
     RunParams,
     SubredditCorpus,
 )
-from .aggregate import aggregate_themes, pair
+from .aggregate import (
+    aggregate_competitors,
+    aggregate_feature_requests,
+    aggregate_themes,
+    pair,
+)
 from .canonicalize import ThemeTaxonomy
 from .extract import CommentExtract, StructuredModel, run_map
 from .filtering import filter_comments
@@ -78,9 +84,7 @@ def _canonicalize(
     from .canonicalize import label_counts
 
     labels = [lbl for e in extracts for lbl in e.candidate_theme_labels]
-    competitors = [
-        cm.name for e in extracts for cm in getattr(e, "competitor_mentions", [])
-    ]
+    competitors = [cm.name for e in extracts for cm in e.competitor_mentions]
     return canonicalizer(label_counts(labels), competitors, topic)
 
 
@@ -113,9 +117,11 @@ def run_analysis(
     if canonicalizer is not None:
         analyzed = pair(filtered, extracts)
         taxonomy = _canonicalize(canonicalizer, extracts, topic=topic)
-        themes = aggregate_themes(
-            analyzed, taxonomy, total_analyzed=len(filtered)
+        themes = aggregate_themes(analyzed, taxonomy, total_analyzed=len(filtered))
+        feature_requests = aggregate_feature_requests(
+            analyzed, total_analyzed=len(filtered)
         )
+        competitor_mentions = aggregate_competitors(analyzed, taxonomy)
 
     if summarizer is not None:
         context = SummaryContext(
