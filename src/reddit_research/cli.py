@@ -80,7 +80,15 @@ def analyze(
     min_score: int = typer.Option(
         defaults.COMMENT_MIN_SCORE, "--min-score", help="Comment score cutoff."
     ),
-    model: str = typer.Option(defaults.DEFAULT_MODEL, "--model", help="LLM model id."),
+    model: str = typer.Option(
+        defaults.DEFAULT_MODEL, "--model", help="LLM model id for all steps (the map step)."
+    ),
+    reduce_model: Optional[str] = typer.Option(
+        None,
+        "--reduce-model",
+        help="Override the model for the reduce steps (canonicalize + summarize); "
+        "enables the mini(map)+sol(reduce) split. Defaults to --model.",
+    ),
     yes: bool = typer.Option(
         False, "--yes", help="Skip the pre-flight cost confirmation."
     ),
@@ -97,6 +105,7 @@ def analyze(
             use_cached=use_cached,
             min_score=min_score,
             model=model,
+            reduce_model=reduce_model,
             yes=yes,
         )
     except ConfigError as exc:

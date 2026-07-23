@@ -49,7 +49,12 @@ def _iso(dt: datetime) -> str:
 
 
 def _run_metadata(
-    cache: RawCache, *, min_score: int, model_id: str, generated_at: datetime
+    cache: RawCache,
+    *,
+    min_score: int,
+    model_id: str,
+    reduce_model_id: str,
+    generated_at: datetime,
 ) -> RunMetadata:
     m = cache.metadata
     return RunMetadata(
@@ -74,7 +79,7 @@ def _run_metadata(
                 for s in m.by_subreddit
             ],
         ),
-        models=Models(map=model_id, reduce=model_id),
+        models=Models(map=model_id, reduce=reduce_model_id),
     )
 
 
@@ -94,12 +99,14 @@ def run_analysis(
     map_model: StructuredModel,
     min_score: int,
     model_id: str,
+    reduce_model_id: str | None = None,
     canonicalizer: Canonicalizer | None = None,
     summarizer: Summarizer | None = None,
     preflight: Preflight | None = None,
     generated_at: datetime | None = None,
 ) -> AnalysisResult:
     generated_at = generated_at or datetime.now(timezone.utc)
+    reduce_model_id = reduce_model_id or model_id
     topic = cache.metadata.topic
 
     filtered = filter_comments(cache, min_score=min_score, topic=topic)
@@ -139,7 +146,11 @@ def run_analysis(
 
     return AnalysisResult(
         run_metadata=_run_metadata(
-            cache, min_score=min_score, model_id=model_id, generated_at=generated_at
+            cache,
+            min_score=min_score,
+            model_id=model_id,
+            reduce_model_id=reduce_model_id,
+            generated_at=generated_at,
         ),
         overall=Overall(
             executive_summary=executive_summary, sentiment=overall_sentiment

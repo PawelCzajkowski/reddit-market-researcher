@@ -97,7 +97,8 @@ def test_overall_sentiment_computed_from_filtered_comments() -> None:
     assert dist.positive == 1
     assert dist.negative == 2
     assert dist.neutral == 1
-    assert result.overall.sentiment.label == "mixed"
+    # negatives are 2/3 of the directional (pos+neg) signal -> negative
+    assert result.overall.sentiment.label == "negative"
 
 
 def test_run_metadata_reflects_model_params_and_corpus() -> None:
@@ -111,6 +112,26 @@ def test_run_metadata_reflects_model_params_and_corpus() -> None:
     assert m.topic == "Notion"
     assert m.generated_at == "2026-07-22T14:30:00Z"
     assert m.corpus.comment_count == 6  # full corpus counted, not the filtered subset
+
+
+def test_reduce_model_split_recorded_in_metadata() -> None:
+    result = run_analysis(
+        _cache(),
+        map_model=FakeMapModel(),
+        min_score=5,
+        model_id="gpt-5.4-mini",
+        reduce_model_id="gpt-5.6-sol",
+        generated_at=GEN,
+    )
+    assert result.run_metadata.models.map == "gpt-5.4-mini"
+    assert result.run_metadata.models.reduce == "gpt-5.6-sol"
+
+
+def test_reduce_model_defaults_to_map_model() -> None:
+    result = run_analysis(
+        _cache(), map_model=FakeMapModel(), min_score=5, model_id="gpt-5.4-mini", generated_at=GEN
+    )
+    assert result.run_metadata.models.reduce == "gpt-5.4-mini"
 
 
 def test_default_model_is_gpt_54_mini() -> None:

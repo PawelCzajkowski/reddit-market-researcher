@@ -20,7 +20,7 @@ from ..models.cache import (
     RawCache,
     SubredditCount,
 )
-from .query import display_subreddit_from_name, normalized_subreddits, query_hash
+from .query import normalized_subreddits, query_hash, subreddit_name
 
 _REDDIT_BASE = "https://www.reddit.com"
 
@@ -112,15 +112,14 @@ def fetch_corpus(
 
     posts: list[CachedPost] = []
     counts: list[SubredditCount] = []
-    for sub in subs:
-        name = sub[2:]  # strip "r/"
+    for display in subs:  # normalized "r/Name" forms
+        name = subreddit_name(display)  # bare name for the PRAW call
         hits = reddit.subreddit(name).search(
             topic, sort=params.sort, time_filter="year", limit=None
         )
         recent = [p for p in hits if p.created_utc >= cutoff]
         recent.sort(key=lambda p: p.score, reverse=True)
         selected = recent[: params.posts_per_subreddit]
-        display = display_subreddit_from_name(name)
         built = [_build_post(p, subreddit=display) for p in selected]
         posts.extend(built)
         counts.append(

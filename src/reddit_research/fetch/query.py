@@ -30,11 +30,6 @@ def subreddit_name(sub: str) -> str:
     return re.sub(r"^r/", "", sub.strip(), flags=re.IGNORECASE)
 
 
-def display_subreddit_from_name(name: str) -> str:
-    """`r/`-prefixed display form for an already-bare subreddit name."""
-    return f"r/{name}"
-
-
 def normalized_subreddits(subreddits: list[str]) -> list[str]:
     """Canonical display list: `r/`-prefixed, deduped, case-insensitively sorted.
 
@@ -52,9 +47,10 @@ def normalized_subreddits(subreddits: list[str]) -> list[str]:
 
 def query_hash(topic: str, subreddits: list[str], params: FetchParams) -> str:
     """Short stable hash of the normalized query (order/case-insensitive)."""
+    names = [n for n in (subreddit_name(s).lower() for s in subreddits) if n]
     canonical = {
         "topic": topic.strip().lower(),
-        "subreddits": sorted(subreddit_name(s).lower() for s in subreddits if subreddit_name(s)),
+        "subreddits": sorted(names),
         "posts_per_subreddit": params.posts_per_subreddit,
         "time_window_days": params.time_window_days,
         "sort": params.sort,

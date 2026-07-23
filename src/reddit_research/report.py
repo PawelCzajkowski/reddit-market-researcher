@@ -35,6 +35,14 @@ def _quote_md(q: Quote) -> str:
     )
 
 
+def _quotes_md(quotes: list[Quote]) -> list[str]:
+    lines: list[str] = []
+    for q in quotes:
+        lines.append(_quote_md(q))
+        lines.append("")
+    return lines
+
+
 def _theme_md(theme: Theme) -> list[str]:
     tag = " 🔴 pain point" if theme.is_pain_point else ""
     lines = [
@@ -47,9 +55,7 @@ def _theme_md(theme: Theme) -> list[str]:
         f"- **Sentiment:** {_sentiment_md(theme.sentiment)}",
         "",
     ]
-    for q in theme.representative_quotes:
-        lines.append(_quote_md(q))
-        lines.append("")
+    lines.extend(_quotes_md(theme.representative_quotes))
     return lines
 
 
@@ -63,9 +69,7 @@ def _feature_request_md(fr: FeatureRequest) -> list[str]:
     if fr.rationale:
         lines.append(f"- **Why:** {fr.rationale}")
     lines.append("")
-    for q in fr.representative_quotes:
-        lines.append(_quote_md(q))
-        lines.append("")
+    lines.extend(_quotes_md(fr.representative_quotes))
     return lines
 
 
@@ -78,9 +82,7 @@ def _competitor_md(cm: CompetitorMention) -> list[str]:
         f"- **Sentiment:** {_sentiment_md(cm.sentiment)}",
         "",
     ]
-    for q in cm.representative_quotes:
-        lines.append(_quote_md(q))
-        lines.append("")
+    lines.extend(_quotes_md(cm.representative_quotes))
     return lines
 
 

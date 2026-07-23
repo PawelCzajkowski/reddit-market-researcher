@@ -13,7 +13,13 @@ import typer
 from . import defaults
 from .analyze.pipeline import run_analysis
 from .analyze.results import result_paths
-from .cache_store import cache_age_days, purge_cache, read_cache, write_cache
+from .cache_store import (
+    cache_age_days,
+    find_cached_for_query,
+    purge_cache,
+    read_cache,
+    write_cache,
+)
 from .config import OpenAICredentials, RedditCredentials
 from .fetch.query import cache_path, query_hash
 from .fetch.reddit import build_reddit, fetch_corpus
@@ -59,28 +65,34 @@ def fetch_command(
 def _resolve_cache(
     *, topic: str, subreddits: list[str], use_cached: bool, cache_dir: str
 ) -> RawCache:
-    """Reuse the query-keyed cache when `--use-cached` and it exists; else fetch fresh.
+    """Reuse the query-keyed cache when `--use-cached`; else fetch fresh.
 
-    Analyze has no fetch-param flags (SPEC §4), so the query key is computed with
-    default fetch params — the same key `fetch` writes with defaults.
+    Analyze has no fetch-param flags (SPEC §4). It first tries the default-params
+    query key, then falls back to any cache matching this topic + subreddits (so a
+    corpus fetched with non-default params is still found), keeping the frozen-cache
+    workflow intact.
     """
-    params = FetchParams()
-    path = cache_path(topic, query_hash(topic, subreddits, params), cache_dir)
-    if use_cached and path.exists():
-        cache = read_cache(path)
-        age = cache_age_days(cache)
-        if age > defaults.CACHE_TTL_DAYS:
-            typer.secho(
-                f"Warning: cached corpus is {age:.0f} days old "
-                f"(> {defaults.CACHE_TTL_DAYS}-day TTL); proceeding anyway. "
-                f"Re-run `fetch` for a fresh corpus.",
-                fg=typer.colors.YELLOW,
-                err=True,
-            )
-        typer.echo(f"Using cached corpus: {path}")
-        return cache
+    if use_cached:
+        exact = cache_path(topic, query_hash(topic, subreddits, FetchParams()), cache_dir)
+        found = exact if exact.exists() else find_cached_for_query(
+            cache_dir, topic=topic, subreddits=subreddits
+        )
+        if found is not None:
+            cache = read_cache(found)
+            age = cache_age_days(cache)
+            if age > defaults.CACHE_TTL_DAYS:
+                typer.secho(
+                    f"Warning: cached corpus is {age:.0f} days old "
+                    f"(> {defaults.CACHE_TTL_DAYS}-day TTL); proceeding anyway. "
+                    f"Re-run `fetch` for a fresh corpus.",
+                    fg=typer.colors.YELLOW,
+                    err=True,
+                )
+            typer.echo(f"Using cached corpus: {found}")
+            return cache
+
     cache, path = _fetch_to_cache(
-        topic=topic, subreddits=subreddits, params=params, cache_dir=cache_dir
+        topic=topic, subreddits=subreddits, params=FetchParams(), cache_dir=cache_dir
     )
     typer.echo(f"Fetched fresh corpus -> {path}")
     return cache
@@ -93,7 +105,8 @@ def analyze_command(
     use_cached: bool,
     min_score: int,
     model: str,
-    yes: bool,
+    reduce_model: str | None = None,
+    yes: bool = False,
 ) -> None:
     from .analyze.canonicalize import run_canonicalize
     from .analyze.cost import estimate_cost
@@ -139,9 +152,10 @@ def analyze_command(
                 raise typer.Abort()
 
     generated_at = datetime.now(timezone.utc)
+    reduce_model = reduce_model or model  # split defaults to a single model (SPEC §8)
     map_model = build_map_model(model)
-    canonicalize_model = build_canonicalize_model(model)
-    summary_model = build_summary_model(model)
+    canonicalize_model = build_canonicalize_model(reduce_model)
+    summary_model = build_summary_model(reduce_model)
 
     def canonicalizer(counts, competitors, topic_):  # noqa: ANN001, ANN202
         return run_canonicalize(canonicalize_model, counts, competitors, topic=topic_)
@@ -154,6 +168,7 @@ def analyze_command(
         map_model=map_model,
         min_score=min_score,
         model_id=model,
+        reduce_model_id=reduce_model,
         canonicalizer=canonicalizer,
         summarizer=summarizer,
         preflight=preflight,
@@ -164,8 +179,11 @@ def analyze_command(
     json_path.parent.mkdir(parents=True, exist_ok=True)
     json_path.write_text(result.model_dump_json(indent=2), encoding="utf-8")
     md_path.write_text(render_report(result), encoding="utf-8")
+    dist = result.overall.sentiment.distribution
+    analyzed = dist.positive + dist.negative + dist.neutral
     typer.echo(
-        f"Analyzed {result.run_metadata.corpus.comment_count} comments; "
+        f"Analyzed {analyzed} of {result.run_metadata.corpus.comment_count} comments "
+        f"(after score/relevance filter); "
         f"overall sentiment={result.overall.sentiment.label} "
         f"({result.overall.sentiment.score:+.2f})\n"
         f"  JSON  -> {json_path}\n"

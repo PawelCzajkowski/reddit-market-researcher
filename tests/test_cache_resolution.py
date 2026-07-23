@@ -72,6 +72,30 @@ def test_use_cached_missing_file_falls_back_to_fetch(tmp_path, monkeypatch) -> N
     assert cache.posts[0].id == "p9"
 
 
+def test_use_cached_finds_cache_fetched_with_nondefault_params(tmp_path, monkeypatch) -> None:
+    # Simulate `fetch --posts-per-subreddit 50`: the file's query hash differs from
+    # the default-params hash analyze would compute, but --use-cached must still find it.
+    subs = ["r/Notion"]
+    from reddit_research.models.cache import FetchParams as FP
+
+    fetched = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    cache = make_cache(
+        [post("p1", [comment("c1")])], topic="Notion", subreddits=subs, fetched_at=fetched
+    )
+    nondefault = cache_path(
+        "Notion", query_hash("Notion", subs, FP(posts_per_subreddit=50)), tmp_path
+    )
+    write_cache(cache, nondefault)
+
+    monkeypatch.setattr(
+        commands, "_fetch_to_cache", lambda **k: pytest.fail("should reuse, not fetch")
+    )
+    resolved = commands._resolve_cache(
+        topic="Notion", subreddits=subs, use_cached=True, cache_dir=str(tmp_path)
+    )
+    assert resolved.metadata.topic == "Notion"
+
+
 def test_stale_cache_warns_but_proceeds(tmp_path, monkeypatch, capsys) -> None:
     subs = ["r/Notion"]
     _write_query_cache(tmp_path, "Notion", subs, days_ago=45)

@@ -37,6 +37,13 @@ def test_mixed_when_neither_dominates() -> None:
     assert block.label == "mixed"
 
 
+def test_lopsided_positive_with_no_negative_is_not_mixed() -> None:
+    # 55% positive / 45% neutral / 0% negative: all directional signal is positive,
+    # so the label must be "positive", not "mixed" (D2 "both substantial" rule).
+    block = aggregate_sentiment([("positive", 0.5)] * 55 + [("neutral", 0.0)] * 45)
+    assert block.label == "positive"
+
+
 def test_neutral_dominates() -> None:
     block = aggregate_sentiment(
         [("neutral", 0.0)] * 7 + [("positive", 0.5)] * 2 + [("negative", -0.5)] * 1

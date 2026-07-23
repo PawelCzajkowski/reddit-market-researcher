@@ -179,12 +179,13 @@ def aggregate_competitors(
         seen: set[str] = set()
         for cm in item.extract.competitor_mentions:
             canonical = name_map.get(cm.name.strip().lower(), cm.name.strip())
-            if not canonical:
+            if not canonical or canonical in seen:
                 continue
+            # count each comment once per competitor — for both mention_count and
+            # the relationship mode, so the two stay on the same per-comment basis
+            seen.add(canonical)
+            members.setdefault(canonical, []).append(item)
             relationships.setdefault(canonical, []).append(cm.relationship)
-            if canonical not in seen:  # count each comment once per competitor
-                members.setdefault(canonical, []).append(item)
-                seen.add(canonical)
 
     mentions: list[CompetitorMention] = []
     for name, group in members.items():
